@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+<meta charset="utf-8">
+<title>Granny Mobile</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+<style>
+body { background: #111; color: #fff; font-family: sans-serif; margin: 0; overflow: hidden; touch-action: none; user-select: none; }
+#unity-container { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; position: relative; }
+#unity-canvas { width: 100%; height: 100%; background: #000; }
+#loading-ui { position: absolute; text-align: center; width: 300px; z-index: 10; }
+#bar-container { width: 100%; height: 6px; background: #333; margin-top: 10px; border-radius: 3px; }
+#bar-fill { width: 0%; height: 100%; background: #eee; border-radius: 3px; transition: width 0.1s; }
+#status-text { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+#unity-warning { position: absolute; top: 10px; background: red; padding: 5px; display: none; color: white; word-break: break-all; z-index: 100; }
+
+#joystick-zone { position: absolute; bottom: 30px; left: 30px; width: 150px; height: 150px; z-index: 20; }
+#touch-look-zone { position: absolute; top: 0; right: 0; width: 100vw; height: 100vh; z-index: 15; }
+
+/* Continue Butonunun Üstüne Gelen Dokunma Katmanı */
+#continue-overlay {
+    position: absolute;
+    bottom: 2%;
+    right: 2%;
+    width: 250px;
+    height: 70px;
+    z-index: 99;
+    background: rgba(255, 255, 255, 0.01); /* Şeffaf alan */
+    cursor: pointer;
+    display: none;
+}
+</style>
+</head>
+<body>
+<div id="unity-container">
+<canvas id="unity-canvas" tabindex="-1"></canvas>
+<div id="loading-ui">
+<div id="status-text">YÜKLENİYOR...</div>
+<div id="bar-container"><div id="bar-fill"></div></div>
+</div>
+<div id="unity-warning"></div>
+
+<!-- CONTINUE Dokunma Alanı -->
+<div id="continue-overlay"></div>
+
+<div id="joystick-zone"></div>
+<div id="touch-look-zone"></div>
+</div>
+
+<script>
+const canvas = document.querySelector("#unity-canvas");
+const statusText = document.querySelector("#status-text");
+const barFill = document.querySelector("#bar-fill");
+const loadingUI = document.querySelector("#loading-ui");
+const warning = document.querySelector("#unity-warning");
+const continueOverlay = document.querySelector("#continue-overlay");
+
+// 23 Parçayı Birleştirme
+async function getCombinedBlob(path, count, label) {
+    const parts = [];
+    for (let i = 1; i <= count; i++) {
+        const num = i.toString().padStart(2, '0');
+        const url = `${path}.part${num}`;
+        statusText.textContent = `${label} %${Math.round((i/count)*100)}`;
+        
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Eksik dosya: ${url}`);
+        
+        parts.push(await res.arrayBuffer());
+        barFill.style.width = `${(i/count)*100}%`;
+    }
+    return URL.createObjectURL(new Blob(parts));
+}
+
+// Oyun Tıklama Simülasyonu
+function triggerCanvasClick(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = rect.left + (rect.width * 0.88);
+    const y = rect.top + (rect.height * 0.92);
+
+    const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y };
+    canvas.dispatchEvent(new MouseEvent('mousedown', opts));
+    canvas.dispatchEvent(new MouseEvent('mouseup', opts));
+    canvas.dispatchEvent(new MouseEvent('click', opts));
+}
+
+// CONTINUE yazısına dokunulduğunda
+continueOverlay.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    triggerCanvasClick(e);
+    continueOverlay.style.display = 'none'; // Başlayınca kaybolur
+});
+
+continueOverlay.addEventListener('click', (e) => {
+    triggerCanvasClick(e);
+    continueOverlay.style.display = 'none'; // Başlayınca kaybolur
+});
+
+// Mobil Kontroller
+function initMobileControls() {
+    continueOverlay.style.display = 'block'; // Yükleme bittiğinde tıklama katmanı aktifleşir
+
+    const manager = nipplejs.create({
+        zone: document.getElementById('joystick-zone'),
+        mode: 'static',
+        position: { left: '75px', bottom: '75px' },
+        color: 'white'
+    });
+
+    let activeKeys = { KeyW: false, KeyS: false, KeyA: false, KeyD: false };
+    const keyMap = { KeyW: [87, 'w'], KeyS: [83, 's'], KeyA: [65, 'a'], KeyD: [68, 'd'] };
+
+    manager.on('move', (evt, data) => {
+        if (!data.vector) return;
+        const x = data.vector.x;
+        const y = data.vector.y;
+        const newKeys = { KeyW: y > 0.3, KeyS: y < -0.3, KeyA: x < -0.3, KeyD: x > 0.3 };
+
+        for (let k in newKeys) {
+            if (newKeys[k] && !activeKeys[k]) {
+                canvas.dispatchEvent(new KeyboardEvent('keydown', { key: keyMap[k][1], keyCode: keyMap[k][0], bubbles: true }));
+            } else if (!newKeys[k] && activeKeys[k]) {
+                canvas.dispatchEvent(new KeyboardEvent('keyup', { key: keyMap[k][1], keyCode: keyMap[k][0], bubbles: true }));
+            }
+        }
+        activeKeys = newKeys;
+    });
+
+    manager.on('end', () => {
+        for (let k in activeKeys) {
+            if (activeKeys[k]) {
+                canvas.dispatchEvent(new KeyboardEvent('keyup', { key: keyMap[k][1], keyCode: keyMap[k][0], bubbles: true }));
+            }
+        }
+        activeKeys = { KeyW: false, KeyS: false, KeyA: false, KeyD: false };
+    });
+
+    // Kamera Bakışı ve Etkileşim
+    const lookZone = document.getElementById('touch-look-zone');
+    let lastX = 0, lastY = 0, isMoving = false;
+
+    lookZone.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            lastX = e.touches[0].clientX;
+            lastY = e.touches[0].clientY;
+            isMoving = false;
+        }
+    });
+
+    lookZone.addEventListener('touchmove', (e) => {
+        isMoving = true;
+        const deltaX = (e.touches[0].clientX - lastX) * 2;
+        const deltaY = (e.touches[0].clientY - lastY) * 2;
+        canvas.dispatchEvent(new MouseEvent('mousemove', { movementX: deltaX, movementY: deltaY, bubbles: true }));
+        lastX = e.touches[0].clientX;
+        lastY = e.touches[0].clientY;
+    });
+
+    lookZone.addEventListener('touchend', () => {
+        if (!isMoving) {
+            canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            setTimeout(() => {
+                canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+            }, 100);
+        }
+    });
+}
+
+// Unity Başlatma
+const buildUrl = "Build";
+const config = {
+    dataUrl: "",
+    frameworkUrl: buildUrl + "/GrannyBog.framework.js",
+    codeUrl: "",
+    streamingAssetsUrl: "StreamingAssets",
+    companyName: "Truffled",
+    productName: "Granny",
+    productVersion: "1.0",
+};
+
+async function start() {
+    try {
+        config.dataUrl = await getCombinedBlob(buildUrl + "/GrannyBog.data", 23, "DATA");
+        config.codeUrl = await getCombinedBlob(buildUrl + "/GrannyBog.wasm", 2, "WASM");
+        
+        statusText.textContent = "Oyun Hazırlanıyor...";
+        const script = document.createElement("script");
+        script.src = buildUrl + "/GrannyBog.loader.js";
+        script.onload = () => {
+            createUnityInstance(canvas, config, (progress) => {
+                barFill.style.width = (100 * progress) + "%";
+            }).then(() => {
+                loadingUI.style.display = "none";
+                initMobileControls();
+            }).catch(err => alert(err));
+        };
+        document.body.appendChild(script);
+    } catch (e) {
+        warning.textContent = e.message;
+        warning.style.display = "block";
+    }
+}
+start();
+</script>
+</body>
+</html>
