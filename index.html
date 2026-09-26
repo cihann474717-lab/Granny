@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Granny - Continue Test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { 
+        width: 100%; height: 100%; overflow: hidden; 
+        background: #000; touch-action: none; user-select: none;
+        font-family: sans-serif;
+    }
+    #unity-canvas { width: 100%; height: 100%; display: block; background: #000; outline: none; }
+    #loading-ui { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: #fff; z-index: 10; }
+    #bar-container { width: 250px; height: 6px; background: #333; margin-top: 15px; border-radius: 3px; overflow: hidden; }
+    #bar-fill { width: 0%; height: 100%; background: #4CAF50; }
+    #status-text { font-size: 14px; font-weight: bold; }
+    
+    /* TEST BUTONLARI - 4 KÖŞE + ORTA */
+    .test-btn {
+        position: absolute; z-index: 4000; display: none;
+        padding: 12px 18px; background: rgba(76,175,80,0.9);
+        border: 2px solid #fff; border-radius: 8px;
+        color: white; font-size: 12px; font-weight: bold;
+        cursor: pointer;
+    }
+    #btn-solalt { bottom: 30px; left: 30px; }
+    #btn-sagalt { bottom: 30px; right: 30px; }
+    #btn-solust { top: 30px; left: 30px; }
+    #btn-sagust { top: 30px; right: 30px; }
+    #btn-orta { top: 50%; left: 50%; transform: translate(-50%,-50%); }
+    
+    #start-btn {
+        position: absolute; top: 50%; left: 50%; 
+        transform: translate(-50%,-50%);
+        z-index: 3000; padding: 20px 50px;
+        background: #4CAF50; border: 3px solid #fff;
+        border-radius: 50px; color: white; 
+        font-size: 22px; font-weight: bold;
+        display: none; cursor: pointer;
+    }
+</style>
+</head>
+<body>
+<canvas id="unity-canvas" tabindex="0"></canvas>
+<div id="loading-ui">
+    <div id="status-text">YÜKLENİYOR...</div>
+    <div id="bar-container"><div id="bar-fill"></div></div>
+</div>
+
+<div id="start-btn">OYUNA BAŞLA</div>
+
+<div class="test-btn" id="btn-solalt">SOL ALT</div>
+<div class="test-btn" id="btn-sagalt">SAĞ ALT</div>
+<div class="test-btn" id="btn-solust">SOL ÜST</div>
+<div class="test-btn" id="btn-sagust">SAĞ ÜST</div>
+<div class="test-btn" id="btn-orta">ORTA</div>
+
+<script>
+    const canvas = document.querySelector("#unity-canvas");
+    const statusText = document.querySelector("#status-text");
+    const barFill = document.querySelector("#bar-fill");
+    const loadingUI = document.querySelector("#loading-ui");
+    const startBtn = document.querySelector("#start-btn");
+
+    async function getCombinedBlob(path, count, label) {
+        const promises = [];
+        for (let i = 1; i <= count; i++) {
+            const num = i.toString().padStart(2, '0');
+            promises.push(fetch(`${path}.part${num}`).then(r => r.arrayBuffer()));
+        }
+        statusText.textContent = `${label} İNDİRİLİYOR...`;
+        return URL.createObjectURL(new Blob(await Promise.all(promises)));
+    }
+
+    // TIKLAMA GÖNDER
+    function sendTap(x, y) {
+        canvas.focus();
+        const opts = {
+            bubbles: true, cancelable: true, composed: true, view: window,
+            clientX: x, clientY: y, screenX: x, screenY: y,
+            button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true
+        };
+        canvas.dispatchEvent(new PointerEvent('pointerdown', opts));
+        canvas.dispatchEvent(new MouseEvent('mousedown', opts));
+        setTimeout(() => {
+            const up = {...opts, buttons: 0};
+            canvas.dispatchEvent(new PointerEvent('pointerup', up));
+            canvas.dispatchEvent(new MouseEvent('mouseup', up));
+            canvas.dispatchEvent(new MouseEvent('click', up));
+        }, 60);
+    }
+
+    // TEST BUTONLARI
+    document.querySelector('#btn-solalt').onclick = () => sendTap(80, window.innerHeight - 80);
+    document.querySelector('#btn-sagalt').onclick = () => sendTap(window.innerWidth - 80, window.innerHeight - 80);
+    document.querySelector('#btn-solust').onclick = () => sendTap(80, 80);
+    document.querySelector('#btn-sagust').onclick = () => sendTap(window.innerWidth - 80, 80);
+    document.querySelector('#btn-orta').onclick = () => sendTap(window.innerWidth/2, window.innerHeight/2);
+
+    // BAŞLAT
+    startBtn.onclick = () => {
+        startBtn.style.display = 'none';
+        document.querySelectorAll('.test-btn').forEach(b => b.style.display = 'block');
+    };
+
+    // UNITY BAŞLAT
+    const buildUrl = "Build";
+    const config = {
+        dataUrl: "", frameworkUrl: buildUrl + "/GrannyBog.framework.js",
+        codeUrl: "", streamingAssetsUrl: "StreamingAssets",
+        companyName: "Truffled", productName: "Granny", productVersion: "1.0"
+    };
+
+    async function start() {
+        try {
+            const [data, wasm] = await Promise.all([
+                getCombinedBlob(buildUrl + "/GrannyBog.data", 23, "DATA"),
+                getCombinedBlob(buildUrl + "/GrannyBog.wasm", 2, "WASM")
+            ]);
+            config.dataUrl = data;
+            config.codeUrl = wasm;
+            statusText.textContent = "Oyun Hazırlanıyor...";
+            
+            const script = document.createElement("script");
+            script.src = buildUrl + "/GrannyBog.loader.js";
+            script.onload = () => {
+                createUnityInstance(canvas, config, (p) => {
+                    barFill.style.width = (100 * p) + "%";
+                }).then(() => {
+                    loadingUI.style.display = "none";
+                    startBtn.style.display = "block";
+                });
+            };
+            document.body.appendChild(script);
+        } catch (e) {
+            alert("Hata: " + e.message);
+        }
+    }
+    window.addEventListener('load', start);
+</script>
+</body>
+</html>
