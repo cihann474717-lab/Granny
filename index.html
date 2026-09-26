@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Granny Mobile & PC</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+<style>
+    * { box-sizing: border-box; }
+    body { 
+        background: #000; color: #fff; font-family: sans-serif; 
+        margin: 0; padding: 0; overflow: hidden; 
+        touch-action: none; user-select: none; -webkit-user-select: none;
+        width: 100vw; height: 100vh;
+    }
+    
+    #unity-container { 
+        width: 100%; height: 100%; position: fixed; 
+        top: 0; left: 0; display: flex; 
+        align-items: center; justify-content: center; z-index: 1;
+    }
+    
+    #unity-canvas { width: 100%; height: 100%; background: #000; display: block; }
+
+    /* Yükleme Ekranı */
+    #loading-ui { 
+        position: absolute; text-align: center; width: 80%; 
+        max-width: 300px; z-index: 10; 
+    }
+    #bar-container { 
+        width: 100%; height: 8px; background: #333; 
+        margin-top: 15px; border-radius: 4px; overflow: hidden;
+    }
+    #bar-fill { 
+        width: 0%; height: 100%; background: #4CAF50; 
+        border-radius: 4px; transition: width 0.1s linear; 
+    }
+    #status-text { 
+        font-size: 16px; font-weight: bold; 
+        text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 0 5px #000;
+    }
+
+    /* Uyarı */
+    #unity-warning { 
+        position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+        background: rgba(255,0,0,0.9); padding: 10px; border-radius: 5px;
+        display: none; color: white; text-align: center; z-index: 1000; max-width: 90%;
+    }
+
+    /* Joystick */
+    #joystick-zone { 
+        position: absolute; bottom: 30px; left: 30px; 
+        width: 140px; height: 140px; z-index: 20; 
+        display: none; /* Başlangıçta gizli */
+    }
+
+    /* Kamera Alanı */
+    #touch-look-zone { 
+        position: absolute; top: 0; right: 0; 
+        width: 50%; height: 100%; z-index: 15; 
+        display: none;
+    }
+
+    /* TIKLAMA KATMANI (Continue, Eşya Al, Kapı Aç vb. için) */
+    #click-overlay {
+        position: absolute; top: 0; left: 0;
+        width: 100%; height: 100%; z-index: 999;
+        background: rgba(0,0,0,0.01); display: none;
+    }
+
+    /* MOBİL BUTONLAR (Sağ Alt Köşe) */
+    #action-buttons {
+        position: absolute; bottom: 30px; right: 30px;
+        z-index: 50; display: none; flex-direction: column; gap: 15px;
+    }
+    .action-btn {
+        width: 70px; height: 70px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.2);
+        border: 2px solid rgba(255, 255, 255, 0.5);
+        color: white; font-size: 12px; font-weight: bold;
+        display: flex; align-items: center; justify-content: center;
+        text-align: center; text-transform: uppercase;
+        backdrop-filter: blur(5px);
+        touch-action: manipulation;
+    }
+    .action-btn:active { background: rgba(255, 255, 255, 0.5); }
+
+    /* ESC Butonu (Sol Üst) */
+    #esc-btn {
+        position: absolute; top: 20px; left: 20px;
+        z-index: 50; display: none;
+        padding: 10px 15px; background: rgba(255,0,0,0.6);
+        border: 1px solid #fff; border-radius: 5px;
+        color: white; font-weight: bold; font-size: 14px;
+        touch-action: manipulation;
+    }
+    #esc-btn:active { background: rgba(255,0,0,0.9); }
+
+    /* Başlangıç Menüsü Butonu (Continue) */
+    #start-btn {
+        position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+        z-index: 1000; padding: 15px 40px;
+        background: rgba(76, 175, 80, 0.8); border: 2px solid #fff;
+        border-radius: 30px; color: white; font-size: 18px; font-weight: bold;
+        display: none; text-transform: uppercase;
+        box-shadow: 0 0 15px rgba(0,0,0,0.5);
+        touch-action: manipulation;
+    }
+    #start-btn:active { background: rgba(76, 175, 80, 1); }
+</style>
+</head>
+<body>
+
+<div id="unity-container">
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    
+    <div id="loading-ui">
+        <div id="status-text">YÜKLENİYOR...</div>
+        <div id="bar-container"><div id="bar-fill"></div></div>
+    </div>
+    
+    <div id="unity-warning"></div>
+
+    <!-- Tıklama Katmanı -->
+    <div id="click-overlay"></div>
+
+    <!-- Mobil Kontroller -->
+    <div id="joystick-zone"></div>
+    <div id="touch-look-zone"></div>
+
+    <!-- Butonlar -->
+    <div id="action-buttons">
+        <div class="action-btn" id="btn-interact">AL / AÇ</div>
+    </div>
+    <div id="esc-btn">ESC (ATLA)</div>
+    <div id="start-btn">BAŞLA / DEVAM ET</div>
+</div>
+
+<script>
+    const canvas = document.querySelector("#unity-canvas");
+    const statusText = document.querySelector("#status-text");
+    const barFill = document.querySelector("#bar-fill");
+    const loadingUI = document.querySelector("#loading-ui");
+    const warning = document.querySelector("#unity-warning");
+    const clickOverlay = document.querySelector("#click-overlay");
+    const startBtn = document.querySelector("#start-btn");
+    const actionButtons = document.querySelector("#action-buttons");
+    const btnInteract = document.querySelector("#btn-interact");
+    const escBtn = document.querySelector("#esc-btn");
+    const joystickZone = document.querySelector("#joystick-zone");
+    const lookZone = document.querySelector("#touch-look-zone");
+
+    let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    let gameStarted = false;
+
+    // --- HIZLI YÜKLEME (PARALEL) ---
+    async function getCombinedBlob(path, count, label) {
+        const promises = [];
+        for (let i = 1; i <= count; i++) {
+            const num = i.toString().padStart(2, '0');
+            const url = `${path}.part${num}`;
+            promises.push(fetch(url).then(res => {
+                if (!res.ok) throw new Error(`Eksik dosya: ${url}`);
+                return res.arrayBuffer();
+            }));
+        }
+        statusText.textContent = `${label} İNDİRİLİYOR...`;
+        const buffers = await Promise.all(promises);
+        return URL.createObjectURL(new Blob(buffers));
+    }
+
+    // --- SENTETİK TIKLAMA (Unity için) ---
+    function simulateClick(x, y, isKey = false, keyCode = 0) {
+        const rect = canvas.getBoundingClientRect();
+        const clickX = x || (rect.left + (rect.width / 2));
+        const clickY = y || (rect.top + (rect.height / 2));
+
+        const eventOptions = {
+            bubbles: true, cancelable: true, view: window,
+            clientX: clickX, clientY: clickY,
+            screenX: clickX, screenY: clickY,
+            button: 0, buttons: 1
+        };
+
+        if (isKey) {
+            // Klavye eventi gönder (ESC için)
+            canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+            canvas.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', keyCode: 27, bubbles: true }));
+        } else {
+            // Mouse/Pointer eventi gönder
+            canvas.dispatchEvent(new PointerEvent('pointerdown', eventOptions));
+            canvas.dispatchEvent(new MouseEvent('mousedown', eventOptions));
+            setTimeout(() => {
+                canvas.dispatchEvent(new PointerEvent('pointerup', eventOptions));
+                canvas.dispatchEvent(new MouseEvent('mouseup', eventOptions));
+                canvas.dispatchEvent(new MouseEvent('click', eventOptions));
+            }, 50);
+        }
+    }
+
+    // --- OYUNU BAŞLAT (Continue Butonu) ---
+    function startGame() {
+        if (gameStarted) return;
+        gameStarted = true;
+        
+        // Continue butonuna tıkla (Ekranın sağ alt köşesi genelde)
+        simulateClick(window.innerWidth * 0.85, window.innerHeight * 0.90);
+        
+        // Butonları gizle, kontrolleri göster
+        startBtn.style.display = 'none';
+        clickOverlay.style.display = 'none';
+        
+        if (isMobile) {
+            joystickZone.style.display = 'block';
+            lookZone.style.display = 'block';
+            actionButtons.style.display = 'flex';
+            escBtn.style.display = 'block';
+        }
+    }
+
+    // --- MOBİL KONTROLLER ---
+    function initMobileControls() {
+        // Joystick
+        const manager = nipplejs.create({
+            zone: joystickZone,
+            mode: 'static',
+            position: { left: '70px', bottom: '70px' },
+            color: 'white',
+            size: 120
+        });
+
+        let activeKeys = { KeyW: false, KeyS: false, KeyA: false, KeyD: false };
+        const keyMap = { KeyW: [87, 'w'], KeyS: [83, 's'], KeyA: [65, 'a'], KeyD: [68, 'd'] };
+
+        manager.on('move', (evt, data) => {
+            if (!data.vector) return;
+            const x = data.vector.x;
+            const y = data.vector.y;
+            const newKeys = { KeyW: y > 0.3, KeyS: y < -0.3, KeyA: x < -0.3, KeyD: x > 0.3 };
+
+            for (let k in newKeys) {
+                if (newKeys[k] && !activeKeys[k]) {
+                    canvas.dispatchEvent(new KeyboardEvent('keydown', { key: keyMap[k][1], keyCode: keyMap[k][0], bubbles: true }));
+                } else if (!newKeys[k] && activeKeys[k]) {
+                    canvas.dispatchEvent(new KeyboardEvent('keyup', { key: keyMap[k][1], keyCode: keyMap[k][0], bubbles: true }));
+                }
+            }
+            activeKeys = newKeys;
+        });
+
+        manager.on('end', () => {
+            for (let k in activeKeys) {
+                if (activeKeys[k]) {
+                    canvas.dispatchEvent(new KeyboardEvent('keyup', { key: keyMap[k][1], keyCode: keyMap[k][0], bubbles: true }));
+                }
+            }
+            activeKeys = { KeyW: false, KeyS: false, KeyA: false, KeyD: false };
+        });
+
+        // Kamera
+        let lastX = 0, lastY = 0, isMoving = false;
+        lookZone.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                lastX = e.touches[0].clientX;
+                lastY = e.touches[0].clientY;
+                isMoving = false;
+            }
+        }, { passive: false });
+
+        lookZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            isMoving = true;
+            const touch = e.touches[0];
+            const deltaX = (touch.clientX - lastX) * 2.5;
+            const deltaY = (touch.clientY - lastY) * 2.5;
+            canvas.dispatchEvent(new MouseEvent('mousemove', { movementX: deltaX, movementY: deltaY, bubbles: true }));
+            lastX = touch.clientX;
+            lastY = touch.clientY;
+        }, { passive: false });
+
+        lookZone.addEventListener('touchend', () => {
+            if (!isMoving) {
+                // Kısa dokunma = Ateş/Etkileşim
+                simulateClick();
+            }
+        });
+    }
+
+    // --- BUTON OLAYLARI ---
+    // Başla Butonu
+    startBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        startGame();
+    });
+
+    // Al / Aç Butonu (Mobil)
+    btnInteract.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        // 'E' tuşuna bas (Genelde etkileşim tuşudur)
+        canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', keyCode: 69, bubbles: true }));
+        setTimeout(() => {
+            canvas.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', keyCode: 69, bubbles: true }));
+        }, 100);
+        // Ayrıca tıklama da gönder (Bazı oyunlar tıklama bekler)
+        simulateClick();
+    });
+
+    // ESC Butonu (Animasyon Atla)
+    escBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        simulateClick(0, 0, true); // ESC tuşu gönder
+    });
+
+    // PC için ESC tuşu dinleyicisi (Ekstra güvence)
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            // Zaten Unity'e gidiyor ama biz de garantiye alalım
+            canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+        }
+    });
+
+    // --- UNITY BAŞLATMA ---
+    const buildUrl = "Build";
+    const config = {
+        dataUrl: "",
+        frameworkUrl: buildUrl + "/GrannyBog.framework.js",
+        codeUrl: "",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "Truffled",
+        productName: "Granny",
+        productVersion: "1.0",
+    };
+
+    async function start() {
+        try {
+            const dataPromise = getCombinedBlob(buildUrl + "/GrannyBog.data", 23, "DATA");
+            const wasmPromise = getCombinedBlob(buildUrl + "/GrannyBog.wasm", 2, "WASM");
+            
+            const [dataBlob, wasmBlob] = await Promise.all([dataPromise, wasmPromise]);
+            
+            config.dataUrl = dataBlob;
+            config.codeUrl = wasmBlob;
+            
+            statusText.textContent = "Oyun Hazırlanıyor...";
+            
+            const script = document.createElement("script");
+            script.src = buildUrl + "/GrannyBog.loader.js";
+            script.onload = () => {
+                createUnityInstance(canvas, config, (progress) => {
+                    barFill.style.width = (100 * progress) + "%";
+                }).then((unityInstance) => {
+                    loadingUI.style.display = "none";
+                    
+                    // Oyun yüklendi, Başla butonunu göster
+                    startBtn.style.display = "block";
+                    
+                    // Mobil kontrolleri hazırla (ama gösterme, başlayınca göstereceğiz)
+                    initMobileControls();
+                    
+                    // PC için kontroller zaten klavye/fare ile çalışır.
+                    
+                }).catch(err => {
+                    warning.textContent = "Hata: " + err;
+                    warning.style.display = "block";
+                });
+            };
+            document.body.appendChild(script);
+        } catch (e) {
+            warning.textContent = "Yükleme Hatası: " + e.message;
+            warning.style.display = "block";
+        }
+    }
+    
+    window.addEventListener('load', start);
+</script>
+</body>
+</html>
